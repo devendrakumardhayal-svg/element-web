@@ -26,6 +26,7 @@ import PWAPlatform from "./platform/PWAPlatform";
 import WebPlatform from "./platform/WebPlatform";
 import { initRageshake, initRageshakeStore } from "./rageshakesetup";
 import { ModuleApi } from "../modules/Api.ts";
+import { startPostMessageAuthListener } from "../PostMessageAuth";
 
 export const rageshakePromise = initRageshake();
 
@@ -61,6 +62,7 @@ export async function loadConfig(): Promise<void> {
     } else {
         SdkConfig.reset();
     }
+    startPostMessageAuthListener();
 }
 
 export async function loadLanguage(): Promise<void> {
