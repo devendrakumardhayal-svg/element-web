@@ -1,22 +1,19 @@
+/*
+Copyright 2024 New Vector Ltd.
+
+SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
+Please see LICENSE files in the repository root for full details.
+*/
 
 import { logger } from "matrix-js-sdk/src/logger";
-
-import type { IMatrixClientCreds } from "./MatrixClientPeg";
-import type { OverwriteLoginPayload } from "./dispatcher/payloads/OverwriteLoginPayload";
-import { Action } from "./dispatcher/actions";
-import defaultDispatcher from "./dispatcher/dispatcher";
 
 const TRUSTED_ORIGINS: string[] = ["*"];
 
 export interface PostMessageAuthData {
     action: "element_auth";
     homeserverUrl: string;
-    userId: string;
     accessToken: string;
     deviceId?: string;
-    identityServerUrl?: string;
-    refreshToken?: string;
-    guest?: boolean;
 }
 
 type PostMessageAuthListener = (event: MessageEvent) => void;
@@ -32,7 +29,6 @@ function isValidAuthData(data: unknown): data is PostMessageAuthData {
     return (
         authData.action === "element_auth" &&
         typeof authData.homeserverUrl === "string" &&
-        typeof authData.userId === "string" &&
         typeof authData.accessToken === "string"
     );
 }
@@ -44,64 +40,75 @@ function isAllowedOrigin(origin: string): boolean {
     return TRUSTED_ORIGINS.includes(origin);
 }
 
-function handleAuthMessage(event: MessageEvent): void {
+async function handleAuthMessage(event: MessageEvent): Promise<void> {
+    logger.info("PostMessageAuth: Received message from", event.origin);
+
     if (!isAllowedOrigin(event.origin)) {
         logger.debug("PostMessageAuth: Ignoring message from disallowed origin", event.origin);
         return;
     }
 
     if (!isValidAuthData(event.data)) {
+        logger.debug("PostMessageAuth: Invalid auth data, ignoring");
         return;
     }
 
     const authData = event.data;
-    logger.info("PostMessageAuth: Received valid auth data from", event.origin);
+    logger.info("PostMessageAuth: Valid auth data received, attempting login");
 
-    const credentials: IMatrixClientCreds = {
-        homeserverUrl: authData.homeserverUrl,
-        userId: authData.userId,
-        accessToken: authData.accessToken,
-        deviceId: authData.deviceId,
-        identityServerUrl: authData.identityServerUrl,
-        refreshToken: authData.refreshToken,
-        guest: authData.guest ?? false,
-    };
+    try {
+        if (typeof window.mxLoginWithAccessToken === "function") {
+            await window.mxLoginWithAccessToken(authData.homeserverUrl, authData.accessToken);
+            logger.info("PostMessageAuth: Login successful");
+            sendResponse(event, true);
+        } else {
+            logger.error("PostMessageAuth: mxLoginWithAccessToken not available");
+            sendResponse(event, false, "Login function not available");
+        }
+    } catch (e) {
+        logger.error("PostMessageAuth: Login failed", e);
+        sendResponse(event, false, e instanceof Error ? e.message : "Login failed");
+    }
+}
 
-    defaultDispatcher.dispatch<OverwriteLoginPayload>(
-        {
-            action: Action.OverwriteLogin,
-            credentials,
-        },
-        true,
-    );
-
+function sendResponse(event: MessageEvent, success: boolean, error?: string): void {
     if (event.source && typeof event.source.postMessage === "function") {
         (event.source as WindowProxy).postMessage(
             {
                 action: "element_auth_response",
-                success: true,
+                success,
+                error,
             },
             event.origin,
         );
     }
 }
 
+/**
+ * Starts listening for postMessage authentication events.
+ * Authentication data can be sent via postMessage from trusted origins defined in TRUSTED_ORIGINS.
+ */
 export function startPostMessageAuthListener(): void {
     if (isListening) {
         return;
     }
-    messageListener = handleAuthMessage;
+    messageListener = (event: MessageEvent): void => {
+        handleAuthMessage(event).catch((e) => {
+            logger.error("PostMessageAuth: Error handling message", e);
+        });
+    };
     window.addEventListener("message", messageListener);
     isListening = true;
     logger.info("PostMessageAuth: Listener started for origins:", TRUSTED_ORIGINS);
 }
 
-
+/**
+ * Stops listening for postMessage authentication events.
+ */
 export function stopPostMessageAuthListener(): void {
     if (!isListening || !messageListener) {
         return;
     }
-
     window.removeEventListener("message", messageListener);
     messageListener = null;
     isListening = false;

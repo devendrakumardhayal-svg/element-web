@@ -62,7 +62,6 @@ export async function loadConfig(): Promise<void> {
     } else {
         SdkConfig.reset();
     }
-    startPostMessageAuthListener();
 }
 
 export async function loadLanguage(): Promise<void> {
@@ -101,6 +100,7 @@ export async function loadApp(fragParams: QueryDict): Promise<void> {
     const app = await module.loadApp(fragParams, setWindowMatrixChat);
     const root = createRoot(document.getElementById("matrixchat")!);
     root.render(app);
+    startPostMessageAuthListener();
 }
 
 export async function showError(title: string, messages?: string[]): Promise<void> {
